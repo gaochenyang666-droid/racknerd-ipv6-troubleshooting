@@ -14,11 +14,9 @@
 
 **三天时间线：** 10 月 15 日旧服务器部署与代理失败 → 10 月 16 日分层抓包、换机和 CDN/UDP 验证 → 10 月 16 日夜间申请并打通 IPv6；10 月 17 日完成证书和稳定性收尾。
 
-**阅读导航：** [故障演变](#1-最开始我以为是软件没装好) · [抓包定位](#2-真正有用的排查是把连接拆成几层) · [失败方案](#3-换机cdnudp我都试过) · [IPv6 最终解法](#4-最终解法向-racknerd-申请原生-ipv6) · [可复用排障清单](docs/排障检查清单.md) · [完整测试记录](docs/测试数据与证据.md) · [PathTrial 复现指南](docs/使用-PathTrial-复现排障.md) · [长期维护清单](docs/维护与后续验收.md) · [PathTrial 实测指南](docs/使用-PathTrial-复现排障.md)
+**阅读导航：** [故障演变](#1-最开始我以为是软件没装好) · [抓包定位](#2-真正有用的排查是把连接拆成几层) · [失败方案](#3-换机cdnudp我都试过) · [IPv6 最终解法](#4-最终解法向-racknerd-申请原生-ipv6) · [可复用排障清单](docs/排障检查清单.md) · [完整测试记录](docs/测试数据与证据.md) · [长期维护清单](docs/维护与后续验收.md) · [PathTrial 实测指南](docs/使用-PathTrial-复现排障.md)
 
 > **隐私说明：** 为避免泄露个人服务器和账号信息，公开版本省略公网地址、认证口令、私钥及域名。本文公开的数据来自本次项目记录，其余推断已标注证据边界。
-
-> **从案例到工具：** 这次排障之后，我把「分层探测、同窗口对照、只依据证据下结论」的经验整理成免费开源的 Rust CLI：[**PathTrial · Evidence-First Network Diagnostics**](https://github.com/gaochenyang666-droid/PathTrial)。它能生成适合工单与 GitHub Issue 的 JSON / Markdown 诊断报告。想照着本案例自行测试，参见 [PathTrial 复现与脱敏指南](docs/使用-PathTrial-复现排障.md)。**本案例原始数据早于 PathTrial 的开发，不能当作该软件当时的测量结果。**
 
 ## 先说结论
 
@@ -233,32 +231,10 @@ pathtrial proxy https://api.github.com/ --proxy socks5://127.0.0.1:1080 --compar
 > **说明**：本文是一次特定时间、机房、IP 和客户端网络下的个人排障记录。对故障位置的判断基于观测证据，不代表对任何运营商或服务商作出确定归因。公开时已省略实际服务器地址、域名、认证口令和密钥。
 
 
-## 8. 延伸推荐：PathTrial，让排障证据更容易复核
-
-如果你也遇到「VPS 服务正在运行，但客户端持续超时」，我推荐试试 [**PathTrial**](https://github.com/gaochenyang666-droid/PathTrial)。它是从这次三天排障中总结出来的免费开源命令行工具，适合 VPS、自托管服务和代理用户。它的重点是**把 DNS、TCP、TLS、HTTP、UDP Echo 和代理路径的结果分开记录，注明哪些结论有证据、哪些还无法确定**，减少盲目重装与反复换协议。
-
-当前 `main` 分支已经支持标准化扫描、真实 HTTP 请求、UDP Echo、SOCKS5 / HTTP CONNECT 和历史报告对照；QUIC / HTTP/3 与无需 SSH 的双端离线关联正在 [Milestone C PR #1](https://github.com/gaochenyang666-droid/PathTrial/pull/1) 中，**尚未合并到 `main`**。具体能力、安装方法和最新状态以 [PathTrial README](https://github.com/gaochenyang666-droid/PathTrial#readme) 为准。
-
-```bash
-# 下面的 YOUR_VPS_IP、端口和网卡都要按自己的环境核对与替换
-pathtrial scan YOUR_VPS_IP --port 22 --profile ssh --rounds 20 --redact-ips
-
-# 验证一个真实 HTTPS 请求
-pathtrial http https://api.github.com/
-
-# 本地 SOCKS5 代理已启动时，比较直连与代理请求
-pathtrial proxy https://api.github.com/ --proxy socks5://127.0.0.1:1080 --compare-direct
-```
-
-`scan` 的 SSH/TCP 22 检测不能证明 Hysteria2 的 UDP/QUIC 可用；UDP Echo 必须有兼容回显服务，代理测试也必须确认真实经过预期 VPS。若两次测试时间或条件不同，不要把它们包装成严格对照。PathTrial 不会自动改变路由或防火墙，也不能仅凭单端探测确定哪个网元丢包。
-
-**建议阅读顺序：** 先看 [原始测试数据与证据](docs/测试数据与证据.md)，再用 [PathTrial 对照复现指南](docs/使用-PathTrial-复现排障.md) 在自己的网络环境生成报告；需要深入定位时仍应结合 `tcpdump`、`mtr` 和服务端日志。**推荐它的理由是让证据更完整、更易复核，不是承诺一键查出所有根因。**
-
 ## 资料与参与
 
 - [测试数据与证据](docs/测试数据与证据.md)：按阶段记录哪些数据能支持结论，哪些仍不能确定。
 - [排障检查清单](docs/排障检查清单.md)：从本机服务、TCP SYN、UDP 回程、IPv4/IPv6 到真实代理请求的分层排障路径。
-- [PathTrial 复现与脱敏指南](docs/使用-PathTrial-复现排障.md)：将案例中的 TCP、TLS、HTTP、UDP Echo 和代理对照转为规范诊断报告。
 - [维护与后续验收](docs/维护与后续验收.md)：手机端验收记录、Wi-Fi / 蜂窝网络分项测试、证书续期和备份检查。
 - [证据图片上传说明](assets/README.md)：如何给抓包、测速、验收截图脱敏。
 - [安全现状与加固](docs/安全现状与加固.md)：现有开放策略、共享口令和防火墙变更风险。
