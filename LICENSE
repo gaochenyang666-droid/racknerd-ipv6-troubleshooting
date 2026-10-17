@@ -1,0 +1,22 @@
+Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+Copyright (c) 2026 gaochenyang666-droid and contributors.
+
+Unless explicitly stated otherwise, the original prose, Markdown documentation,
+tables, flowcharts and other non-code content of this repository are licensed
+under the Creative Commons Attribution 4.0 International Public License.
+
+Official license text (legally controlling):
+https://creativecommons.org/licenses/by/4.0/legalcode
+
+You may share and adapt this material, including commercially, provided you
+give appropriate attribution, link to the license, and indicate changes.
+No warranties are provided. The license does not grant trademark, patent,
+privacy, publicity or other rights outside its stated scope.
+
+Original executable code within scripts/ is licensed separately under the
+MIT License in scripts/LICENSE.
+
+External links and third-party materials remain subject to their own licenses.
+This license does not cover secrets, private configuration or screenshots
+belonging to third parties.
