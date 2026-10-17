@@ -1,8 +1,8 @@
 # 一台 RackNerd VPS 折腾三天，最后靠免费 IPv6 救活：代理排障避坑实录
 
 > 时间：2026 年 10 月 15 日至 17 日  
-> 环境：RackNerd 洛杉矶 VPS、Ubuntu 24.04、Mac、iPhone、Hysteria 2  
-> 关键词：TCP 丢包、QUIC、UDP、Cloudflare、IPv6、抓包、证书续期
+> 环境：RackNerd 洛杉矶 VPS、Ubuntu 24.04、Mac、iPhone、Hysteria2  
+> 关键词：TCP 丢包、QUIC、UDP、Cloudflare、IPv6、抓包、证书续期、macOS 路由
 
 
 
@@ -10,15 +10,17 @@
 
 > **快速结论：** 当 IPv4 入口的 TCP/UDP 实际通信持续异常时，值得先核查服务商是否提供原生 IPv6，再对 IPv6 入口进行完整的 HTTPS 业务验收。本案对照实验中，同一服务器改用 IPv6 后通过 20/20 次 HTTPS 测试；后续用户也确认 iPhone 手机端验收成功，手机端的分项测试数据未单独记录。
 
+**三天时间线：** 10 月 15 日旧服务器部署与代理失败 → 10 月 16 日分层抓包、换机和 CDN/UDP 验证 → 10 月 16 日夜间申请并打通 IPv6；10 月 17 日完成证书和稳定性收尾。
+
 **阅读导航：** [故障演变](#1-最开始我以为是软件没装好) · [抓包定位](#2-真正有用的排查是把连接拆成几层) · [失败方案](#3-换机cdnudp我都试过) · [IPv6 最终解法](#4-最终解法向-racknerd-申请原生-ipv6) · [可复用排障清单](docs/排障检查清单.md) · [完整测试记录](docs/测试数据与证据.md) · [长期维护清单](docs/维护与后续验收.md)
 
 > **隐私说明：** 为避免泄露个人服务器和账号信息，公开版本省略公网地址、认证口令、私钥及域名。本文公开的数据来自本次项目记录，其余推断已标注证据边界。
 
 ## 先说结论
 
-这三天里，我清理过代理内核，部署过 REALITY、WebSocket、gRPC，换过端口、宿主机，试过 Cloudflare Tunnel，又把希望放到 UDP 和 Hysteria 2 上。它们最终都没能修好原来的 **IPv4 入口**。
+这三天里，我清理过代理内核，部署过 REALITY、WebSocket、gRPC，换过端口、宿主机，试过 Cloudflare Tunnel，又把希望放到 UDP 和 Hysteria2 上。它们最终都没能修好原来的 **IPv4 入口**。
 
-真正的转机来自 RackNerd 官方知识库里的一条信息：**洛杉矶机房可以申请原生 IPv6**。我提交工单，拿到免费 IPv6 地址后，在同一台机器、同一套 Hysteria 2 服务和同一个客户端上，只把连接入口从 IPv4 换成 IPv6，真实 HTTPS 验收随即从失败变成 **20/20 成功**。
+真正的转机来自 RackNerd 官方知识库里的一条信息：**洛杉矶机房可以申请原生 IPv6**。我提交工单，拿到免费 IPv6 地址后，在同一台机器、同一套 Hysteria2 服务和同一个客户端上，只把连接入口从 IPv4 换成 IPv6，真实 HTTPS 验收随即从失败变成 **20/20 成功**。
 
 这篇记录想提醒后来者：**遇到代理连接失败，先验证网络路径能否完成真实业务握手，再决定要不要重装或换协议。**
 
@@ -55,17 +57,17 @@ Cloudflare 也没带来突破：测试的边缘路径上，IPv4 TCP **0/20**；I
 
 这让我意识到一个常见误区：**CDN 只有在客户端能稳定连上 CDN 边缘、边缘也能连上源站时才有意义。** 如果客户端到边缘的连接就失败，再加一层 CDN 没有帮助。我的结论只针对当时测试过的节点和路径，并不代表 Cloudflare 在所有网络环境里都不可用。
 
-之后我尝试 UDP。最初向未监听的端口发送数据，看到 **10/10** 成功，一度以为 UDP 可以救场。但服务器实际返回的是 **ICMP 端口不可达**，并非 UDP 应用载荷。真正部署 UDP Echo 和 Hysteria 2 之后，结果很不乐观：
+之后我尝试 UDP。最初向未监听的端口发送数据，看到 **10/10** 成功，一度以为 UDP 可以救场。但服务器实际返回的是 **ICMP 端口不可达**，并非 UDP 应用载荷。真正部署 UDP Echo 和 Hysteria2 之后，结果很不乐观：
 
 | 同阶段测试 | 成功率 |
 | --- | ---: |
 | UDP 64 字节探测（ICMP 错误回程） | 10/10 |
 | UDP 1200 字节探测（ICMP 错误回程） | 9/10 |
 | 真实 UDP Echo | 1/5（另有时段 3/20、0/12） |
-| Hysteria 2 / QUIC 隧道握手 | 0/10 |
-| TCP 22（一次对照） | 1/3 |
+| Hysteria2 / QUIC 隧道握手 | 0/10 |
+| TCP 22（同分钟配对） | 1/10（另一次三连探测为 1/3） |
 
-Hysteria 2 的 systemd 服务正常，UDP 端口也在监听，但客户端 10 次均在 QUIC 握手阶段超时，连认证阶段都没进入。
+Hysteria2 的 systemd 服务正常，UDP 端口也在监听，但客户端 10 次均在 QUIC 握手阶段超时，连认证阶段都没进入。
 
 **教训：UDP 探测能收到 ICMP 回包，不等于真实 UDP 会话可用；端口监听成功，也不等于代理隧道可用。**
 
@@ -73,7 +75,26 @@ Hysteria 2 的 systemd 服务正常，UDP 端口也在监听，但客户端 10 �
 
 转机来自阅读官方知识库。我发现当时的 RackNerd 洛杉矶 VPS 可以免费申请原生 IPv6，于是提交了工单。
 
-拿到 IPv6 地址后，服务器端已经将地址写入 netplan，我只补齐必要的系统配置。随后让客户端通过 IPv6 连接原有的 Hysteria 2 服务。
+拿到 IPv6 地址后，服务器端已将静态地址写入 `/etc/netplan/`，我核对地址、路由及 `sysctl`，确认没有启用 `disable_ipv6=1`。在**静态 IPv6 默认路由已配置、不会依赖路由器通告（RA）获取默认网关**的前提下，关闭 IPv6 的 `autoconf`、`accept_ra`，避免额外的 RA 默认路由与现有路由竞争，并执行 `sysctl -p` 使 `/etc/sysctl.conf` 中的设置生效。随后让客户端通过 IPv6 连接原有的 Hysteria2 服务。
+
+下面展示的是**本案例的检查要点，切勿在依赖 SLAAC/RA 的服务器上直接套用**：
+
+```bash
+# 先核对静态 IPv6 地址与默认路由，务必保留 VNC/其他管理入口
+ip -6 address show
+ip -6 route show default
+
+# 检查 IPv6 禁用状态和 RA / 自动配置设置
+sysctl net.ipv6.conf.all.disable_ipv6
+sysctl net.ipv6.conf.default.disable_ipv6
+sysctl net.ipv6.conf.all.accept_ra
+sysctl net.ipv6.conf.all.autoconf
+
+# 仅当已经评估 /etc/sysctl.conf 的修改适合当前静态网络配置
+sudo sysctl -p
+```
+
+若设置写入 `/etc/sysctl.d/*.conf`，应使用 `sudo sysctl --system` 读取相应配置；实际写入的键、网卡名及生效范围应按服务器原配置核对。远程修改 IPv6 路由存在失联风险，建议在 VNC 中操作。
 
 **这次没有重新换代理协议，也没有再买服务器。**
 
@@ -101,7 +122,9 @@ Hysteria 2 的 systemd 服务正常，UDP 端口也在监听，但客户端 10 �
 
 ### 官方依据与适用条件
 
-RackNerd 官方 [KVM VPS 常见问题](https://www.racknerd.com/kvm-vps) 明确说明，**洛杉矶和法国机房可通过工单申请最多 100 个免费 IPv6 地址**（以申请时的实际套餐和服务商政策为准）。这条信息直接启发了本次修复。不要据此推断所有机房都免费提供 IPv6。
+RackNerd 官方知识库《[Do you provide IPv6?](https://my.racknerd.com/index.php?rp=/knowledgebase/25/Do-you-provide-IPv6-.html)》（2026 年 10 月 16 日查阅）列出五个可分配免费原生 IPv6 的位置：**洛杉矶、犹他、多伦多（加拿大）、斯特拉斯堡（法国）、都柏林（爱尔兰）**。购买 VPS 后可提交工单申请，最多 **100 个 IPv6 地址**，免费分配；实际资格以服务商当时答复为准。
+
+**地址数量与地址段要分清：** 本次工单中客服说明，VPS 的 IPv6 通过不同 VLAN 路由，按**单个 IPv6 地址**分配，**不向 VPS 路由整个 /64 前缀**。知识库另外提到，符合条件的**独立服务器**客户可申请 /64 前缀。申请多个单地址，并不意味着获得一个可自主分配的 /64 网段。
 
 申请后还应逐一确认：服务器系统已有 IPv6 地址、默认 IPv6 路由有效、防火墙允许所需 UDP 端口、客户端网络能访问 IPv6，并且客户端使用的是正确的 IPv6 入口。
 
@@ -109,7 +132,17 @@ RackNerd 官方 [KVM VPS 常见问题](https://www.racknerd.com/kvm-vps) 明确�
 
 代理跑通后，我把证书续期流程从旧服务器迁了过来，却发现 Let's Encrypt API 所在的路径也有访问问题，直接连接会卡住。
 
-最后让签发过程经过 Mac 上可用的本地隧道，私钥仍保留在 Mac。强制续期、证书部署、服务重启以及复测都成功，新证书有效期延续到了 **2027 年 1 月**。之后也卸载了不再需要的 `cloudflared`。
+进一步排查发现，ACME 目录端点 `acme-v02.api.letsencrypt.org` 在当时解析到了 Cloudflare 网络地址；恰好此前同一条客户端到 Cloudflare 的路径已测得 IPv4 TCP 基本全败、IPv6 TLS 全败，`acme.sh` 因访问 ACME API 失败而报 `Cannot init API`。这是本次测试环境的路径关联，**并不意味着所有地区的 Let's Encrypt 都存在问题**。
+
+解决方式是在 Mac 上让证书签发进程使用可用的本地代理隧道，同时通过 `NO_PROXY` 排除 DNS 提供商的 API 域名，避免无谓地让 DNS 验证 API 也经过问题路径。下方仅演示环境变量的作用范围，`dns-api.example.invalid` 是占位符，必须根据 DNS 插件实际连接的主机名设置：
+
+```bash
+ALL_PROXY=socks5h://127.0.0.1:1080 \
+NO_PROXY=dns-api.example.invalid \
+  acme.sh --renew -d example.com
+```
+
+上述示例不包含实际域名、凭据与自动化任务；使用前需验证所用 `acme.sh` 版本、HTTP 工具及 DNS 插件确实遵循代理环境变量。私钥仍保留在 Mac。强制续期、证书部署、服务重启以及复测全部成功，新证书有效期延续到了 **2027 年 1 月**。之后卸载了不再需要的 `cloudflared`。
 
 这里必须保留一个待验证项：**一次强制续期成功，不足以证明长期完全无人值守。** 如果续期依赖 Mac 在线和本地隧道运行，自动化就仍有外部依赖，需要单独处理。
 
@@ -124,6 +157,28 @@ RackNerd 官方 [KVM VPS 常见问题](https://www.racknerd.com/kvm-vps) 明确�
 7. **查服务商官方知识库。** 尤其留意 IPv6、备用 IP、管理控制台、网络路由与换 IP 政策。
 8. **管理通道与测试通道分开。** 尽量保留独立 SSH/VNC 入口，避免把自己锁在服务器外。
 9. **只有业务验收成功才算修好。** `active (running)`、端口监听、Ping 成功，都只能算阶段性证据。
+
+### 快速判断连接故障在哪一层
+
+下面这张流程图可用于分层排查。每一层的“成功”只说明该层可用，最终仍需验证真实代理业务。
+
+```mermaid
+flowchart TD
+    A[服务器进程与本地 loopback 检查] --> B{本机业务请求成功?}
+    B -->|否| C[检查服务配置和监听]
+    B -->|是| D[客户端纯 TCP 或真实 UDP Echo 测试]
+    D --> E{基本传输可用?}
+    E -->|否| F[双端抓包, 对照其他目的 IP, 检查 IPv4/IPv6]
+    E -->|是| G[TLS 或 QUIC 完整握手]
+    G --> H{握手完成?}
+    H -->|否| I[检查证书认证, 防火墙及会话丢包]
+    H -->|是| J[真实 HTTPS 及出口 IP 验收]
+    J --> K{多次连续通过?}
+    K -->|否| L[查分流, 吞吐和稳定性]
+    K -->|是| M[记录成功率并保留监控]
+```
+
+对 macOS 可以直接使用 [绑定物理网卡的 TCP/TLS 对照脚本](scripts/mac_path_probe.py)，脚本采用预先核对的**字面 IP**，跳过系统 DNS 解析与 Fake-IP 地址；在同一分钟低频交替检测故障目标和已知正常的对照目标。命令及使用限制见 [排障检查清单](docs/排障检查清单.md)。
 
 ## 7. 目前还有哪些问题？
 
@@ -150,4 +205,4 @@ RackNerd 官方 [KVM VPS 常见问题](https://www.racknerd.com/kvm-vps) 明确�
 - [维护与后续验收](docs/维护与后续验收.md)：手机端验收记录、Wi-Fi / 蜂窝网络分项测试、证书续期和备份检查。
 - [证据图片上传说明](assets/README.md)：如何给抓包、测速、验收截图脱敏。
 
-本文是公开经验记录，尚未添加开放许可协议；引用时建议标明出处，转载或重新授权请先联系仓库维护者。
+文档及文章采用 [CC BY 4.0](LICENSE) 授权，引用或改编需注明来源与修改情况；示例代码的 MIT 授权见 [scripts/LICENSE](scripts/LICENSE)。
