@@ -10,9 +10,11 @@
 
 > **快速结论：** 当 IPv4 入口的 TCP/UDP 实际通信持续异常时，值得先核查服务商是否提供原生 IPv6，再对 IPv6 入口进行完整的 HTTPS 业务验收。本案对照实验中，同一服务器改用 IPv6 后通过 20/20 次 HTTPS 测试；后续用户也确认 iPhone 手机端验收成功，手机端的分项测试数据未单独记录。
 
+> **从这份案例延伸出的开源工具：** [PathTrial](https://github.com/gaochenyang666-droid/PathTrial)（Rust / MIT）把 DNS、TCP、TLS、HTTP、UDP Echo 与代理链路检测整理成可复核的 JSON / Markdown 报告。本文是 **2026 年 10 月的原始排障记录**，历史数字并非 PathTrial 在当时测得。参见 [用 PathTrial 复现排障流程](docs/使用-PathTrial-复现排障.md)。
+
 **三天时间线：** 10 月 15 日旧服务器部署与代理失败 → 10 月 16 日分层抓包、换机和 CDN/UDP 验证 → 10 月 16 日夜间申请并打通 IPv6；10 月 17 日完成证书和稳定性收尾。
 
-**阅读导航：** [故障演变](#1-最开始我以为是软件没装好) · [抓包定位](#2-真正有用的排查是把连接拆成几层) · [失败方案](#3-换机cdnudp我都试过) · [IPv6 最终解法](#4-最终解法向-racknerd-申请原生-ipv6) · [可复用排障清单](docs/排障检查清单.md) · [完整测试记录](docs/测试数据与证据.md) · [长期维护清单](docs/维护与后续验收.md)
+**阅读导航：** [故障演变](#1-最开始我以为是软件没装好) · [抓包定位](#2-真正有用的排查是把连接拆成几层) · [失败方案](#3-换机cdnudp我都试过) · [IPv6 最终解法](#4-最终解法向-racknerd-申请原生-ipv6) · [可复用排障清单](docs/排障检查清单.md) · [完整测试记录](docs/测试数据与证据.md) · [长期维护清单](docs/维护与后续验收.md) · [PathTrial 实测指南](docs/使用-PathTrial-复现排障.md)
 
 > **隐私说明：** 为避免泄露个人服务器和账号信息，公开版本省略公网地址、认证口令、私钥及域名。本文公开的数据来自本次项目记录，其余推断已标注证据边界。
 
@@ -194,6 +196,30 @@ flowchart TD
 - **自动续期依赖**：还需确认 Mac 不在线时，续期能否独立完成。
 - **旧服务器状态文件**：暂时保留作历史记录，避免丢失排障证据。
 
+## 8. 从手动排障到开源工具 PathTrial
+
+整理这份记录后，我把其中最容易出现误判的规则做成了开源命令行工具 **[PathTrial](https://github.com/gaochenyang666-droid/PathTrial)**。它面向 VPS、自托管与代理链路故障，按固定流程采集网络证据，输出可供工程师、GitHub Issue 和服务商工单复核的 JSON / Markdown 报告。
+
+最实用的部分是**明确说明测到了什么，以及还不能证明什么**：TCP 能建连不代表 TLS 或业务可用，ICMP 错误响应不能当作 UDP Echo 成功，Fake-IP/TUN 可能污染“直连”测量；失败阶段与证据边界会分开记录。
+
+在 Mac 上安装后，可从自己的服务器地址开始（以下均为占位符，`en0` 需替换为实际物理接口；对于 SSH 22 端口使用 `ssh` profile，不做 TLS）：
+
+```bash
+# 记录 TCP 连接情况，IPv4 和 IPv6 分别测试；保留实际时间窗
+pathtrial scan <YOUR_VPS_IPV4> --port 22 --profile ssh --rounds 20 --bind-interface en0 --redact-ips
+pathtrial scan <YOUR_VPS_IPV6> --port 22 --profile ssh --rounds 20 --bind-interface en0 --redact-ips
+
+# 验证 HTTP 应用响应，以及自己授权的本地 SOCKS5 出口
+pathtrial http https://api.github.com/
+pathtrial proxy https://api.github.com/ --proxy socks5://127.0.0.1:1080 --compare-direct
+```
+
+**注意：** 上述两次 IP 扫描并不自动构成同一分钟内严格交替的受控对照；`scan` 的 TCP/TLS 结果也不能代替 Hysteria2 的 UDP/QUIC 真实业务验收。公开报告前应人工检查网卡、域名与网络环境信息，`--redact-ips` 只负责地址脱敏。
+
+当前 `main` 已提供 UDP Echo、SOCKS5、HTTP CONNECT 和历史报告对比等能力；进一步的 **QUIC/HTTP3 与双端离线关联**位于 [PathTrial Milestone C PR #1](https://github.com/gaochenyang666-droid/PathTrial/pull/1)，在合并之前不要将其视为默认分支已发行的功能。
+
+详细的对应关系、命令示例和限制见 **[用 PathTrial 复现本案排障流程](docs/使用-PathTrial-复现排障.md)**。如果你也碰到“服务 active、端口监听正常，但客户端就是超时”的问题，可以先用 PathTrial 生成脱敏证据，再结合这篇案例判断下一步，而不是立刻重装或换协议。
+
 ## 写在最后
 
 这三天最费时间的事情，是在服务正常时反复怀疑协议和配置；最有用的事情，是停止猜测，用同一时段的对照测试、双端抓包和真实业务请求逐步缩小范围。
@@ -213,5 +239,6 @@ flowchart TD
 - [证据图片上传说明](assets/README.md)：如何给抓包、测速、验收截图脱敏。
 - [安全现状与加固](docs/安全现状与加固.md)：现有开放策略、共享口令和防火墙变更风险。
 - [环境与复现条件](docs/环境与复现条件.md)：系统、软件版本已知项以及测试口径。
+- [PathTrial 复现与报告指南](docs/使用-PathTrial-复现排障.md)：将本案例的 DNS、TCP、TLS、代理与 UDP 证据映射到开源诊断工具。
 
 文档及文章采用 [CC BY 4.0](LICENSE) 授权，引用或改编需注明来源与修改情况；示例代码的 MIT 授权见 [scripts/LICENSE](scripts/LICENSE)。
