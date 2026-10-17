@@ -1,0 +1,23 @@
+# Secrets and local configuration
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*password*
+*secret*
+*.pcap
+*.pcapng
+
+# OS and editor
+.DS_Store
+.idea/
+.vscode/
+
+# Python temporary files
+__pycache__/
+*.pyc
+.venv/
